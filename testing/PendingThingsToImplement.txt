@@ -1,0 +1,21 @@
+1]
+Recommended Alternative Approach: Transactional Flow with Retry Mechanism
+Use a combination of both approaches with a two-phase commit-like logic:
+
+Steps:
+Save Metadata as PENDING_UPLOAD in MongoDB:
+
+Record the file details (except Drive ID) in MongoDB with a PENDING_UPLOAD status.
+Upload File to Google Drive:
+
+Attempt to upload the file to Google Drive.
+If the upload succeeds, retrieve the Drive ID.
+Update MongoDB Record:
+
+Update the record in MongoDB with the Drive ID and change the status to UPLOADED.
+Error Handling:
+
+If the upload to Drive fails, retry the upload later.
+Implement a cleanup job for PENDING_UPLOAD records older than a certain time if they remain unresolved.
+
+2]

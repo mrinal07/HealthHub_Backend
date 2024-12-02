@@ -133,6 +133,10 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
 
     console.log("Upload Token", googleToken.access_token);
 
+    mongoClient = await connectToCluster(uri);
+    const db = mongoClient.db("health-db");
+    const collection = db.collection("document-user");
+
     // /google-auth-callback route will set the token in the cookie
     // res.cookie("token", googleToken.access_token, {
     //   httpOnly: true, // Prevents JavaScript access
@@ -146,7 +150,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
       const fileId = existingFiles.data.files[0].id;
       const filePath = req.file.path;
 
-      // Overwrite the file
+      // Overwrite the file in google drive
       const updateExistingDoc = await drive.files.update({
         fileId,
         media: {
@@ -160,8 +164,25 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
       //   );
       console.log(`File "${req.file.originalname}" updated with ID: ${fileId}`);
 
+      // Update the document in the database
+      const filter = { Document_Drive_Id: fileId }; // Condition to find the document
+      const data = {
+        $set: {
+          Document_Name: req.body.Document_Name, // Document Name
+          Document_Type: req.body.Document_Type, // Document Type
+          Document_Description: req.body.Additional_Notes, // Additional Notes
+          Last_Modify_Date: new Date().toISOString(), // Last Modify Date
+          Status_Enum: Number(req.body.Status_Enum) ?? 0, // Status Enum
+          Lock_Id: req.body._id === undefined ? 1 : req.body.Lock_Id + 1, // Lock ID
+        },
+      };
+      const result = await collection.updateOne(filter, data, {
+        upsert: true,
+      });
+
       res.status(200).json({
         message: `File "${req.file.originalname}" updated`,
+        result: result,
         fileId: existingFiles.data.files[0].id,
         webViewLink: "NA",
         webContentLink: "NA",
@@ -193,10 +214,6 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
         // console.log(req.body);
         // console.log(path.basename(filePath));
 
-        mongoClient = await connectToCluster(uri);
-        const db = mongoClient.db("health-db");
-        const collection = db.collection("document-user");
-
         // console.log(req.body._id);
 
         const filter = { _id: new ObjectId(req.body._id) }; // Condition to find the document
@@ -216,7 +233,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
             Document_Parent_Folder_Id: childFolderData.id, // Parent Folder ID
             Status_Enum: Number(req.body.Status_Enum) ?? 0, // Status Enum
             Lock_Id: req.body._id === undefined ? 1 : req.body.Lock_Id + 1, // Lock ID
-            Last_Modify_Date: new Date().toISOString().split("T")[0], // Last Modify Date
+            Last_Modify_Date: new Date().toISOString(), // Last Modify Date
           },
         };
         const result = await collection.updateOne(filter, data, {
@@ -338,73 +355,105 @@ router.get("/fetch-data", async (req, res) => {
 });
 
 router.get("/fetch-detailed-data", async (req, res) => {
-  const { token } = req.cookies;
-  const { code } = req.query;
-  console.log("Code", code);
-  console.log("Fetch Token", req.cookies);
+  try {
+    const { token } = req.cookies;
+    const { code } = req.query;
+    console.log("Code", code);
+    console.log("Fetch Token", req.cookies);
 
-  const auth = new google.auth.OAuth2(
-    process.env.client_id,
-    process.env.client_secret,
-    process.env.redirect_uris
-  );
+    const auth = new google.auth.OAuth2(
+      process.env.client_id,
+      process.env.client_secret,
+      process.env.redirect_uris
+    );
 
-  auth.setCredentials({ refresh_token: token });
-  const drive = google.drive({ version: "v3", auth });
+    auth.setCredentials({ refresh_token: token });
+    const drive = google.drive({ version: "v3", auth });
 
-  const result = [];
+    const result = [];
 
-  const datedFolderData = await drive.files.list({
-    q: `'${code}' in parents and trashed = false`,
-    fields: "files(id, name, mimeType, webViewLink, thumbnailLink)",
-  });
-
-  if (datedFolderData.data.files.length > 0) {
-    console.log("Dated Folder found in Month folder:");
-
-    const folderPromises = datedFolderData.data.files.map(async (file) => {
-      console.log(`Name: ${file.name}, ID: ${file.id}`);
-
-      const filesData = await drive.files.list({
-        q: `'${file.id}' in parents and trashed = false`,
-        fields: "files(id, name, mimeType, webViewLink, thumbnailLink)",
-      });
-
-      if (filesData.data.files.length > 0) {
-        console.log("Files found in the folder:");
-
-        // const getObjByDate = result.find((x) => x.Date === file.name);
-
-        const imgArray = [];
-
-        const filePromises = filesData.data.files.map((file2) => {
-          console.log(`Name: ${file2.name}, ID: ${file2.id}`);
-          imgArray.push({
-            name: file2.name,
-            id: file2.id,
-            webViewLink: file2.webViewLink,
-            thumbnailLink: file2.thumbnailLink,
-          });
-        });
-
-        result.push({
-          Date: file.name,
-          img: imgArray,
-        });
-
-        // Wait for all file-related promises to resolve
-        await Promise.all(filePromises);
-      }
+    const datedFolderData = await drive.files.list({
+      q: `'${code}' in parents and trashed = false`,
+      fields: "files(id, name, mimeType, webViewLink, thumbnailLink)",
     });
-    // Await the promises for each folder
-    await Promise.all(folderPromises); // Wait for all folder promises to complete
-  } else {
-    console.log("No files found in the folder.");
+
+    if (datedFolderData.data.files.length > 0) {
+      console.log("Dated Folder found in Month folder:");
+
+      const folderPromises = datedFolderData.data.files.map(async (file) => {
+        console.log(`Name: ${file.name}, ID: ${file.id}`);
+
+        const filesData = await drive.files.list({
+          q: `'${file.id}' in parents and trashed = false`,
+          fields: "files(id, name, mimeType, webViewLink, thumbnailLink)",
+        });
+
+        if (filesData.data.files.length > 0) {
+          console.log("Files found in the folder:");
+
+          // const getObjByDate = result.find((x) => x.Date === file.name);
+
+          const imgArray = [];
+          let dbResult;
+          mongoClient = await connectToCluster(uri);
+          const db = mongoClient.db("health-db");
+          const collection = db.collection("document-user");
+
+          const filePromises = filesData.data.files.map(async (file2) => {
+            console.log(`Name: ${file2.name}, ID: ${file2.id}`);
+            // Get the document details from the database by using the Drive ID
+            dbResult = await collection
+              .find({
+                Document_Drive_Id: file2.id,
+              })
+              .toArray();
+
+            dbResult = dbResult[0];
+
+            console.log("dbResult => ", dbResult);
+
+            imgArray.push({
+              fileName: file2.name,
+              fileId: file2.id,
+              fileWebViewLink: file2.webViewLink,
+              fileThumbnailLink: file2.thumbnailLink,
+              dbId: dbResult._id,
+
+              dbUserId: dbResult.User_Id,
+              dbDocumentName: dbResult.Document_Name,
+              dbDocumentType: dbResult.Document_Type,
+              dbDocumentDescription: dbResult.Document_Description,
+              dbDocumentUploadDate: dbResult.Document_Upload_Date,
+              dbDocumentExpireDate: dbResult.Document_Expire_Date,
+              dbStatusEnum: dbResult.Status_Enum,
+              dbLockId: dbResult.Lock_Id,
+              dbLastModifyDate: dbResult.Last_Modify_Date,
+              dbDocumentDriveId: dbResult.Document_Drive_Id,
+              dbDocumentParentFolderId: dbResult.Document_Parent_Folder_Id,
+            });
+          });
+
+          result.push({
+            Date: file.name,
+            img: imgArray,
+          });
+
+          // Wait for all file-related promises to resolve -- IMP LOGIC
+          await Promise.all(filePromises);
+        }
+      });
+      // Await the promises for each folder
+      await Promise.all(folderPromises); // Wait for all folder promises to complete -- IMP LOGIC
+    } else {
+      console.log("No files found in the folder.");
+    }
+
+    console.log(result);
+
+    res.status(200).json({ result: result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-
-  console.log(result);
-
-  res.status(200).json({ message: "Success", result: result });
 });
 
 // Create a folder in Google Drive
