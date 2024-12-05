@@ -7,7 +7,7 @@ const path = require('path');
 // CORS added for Deployement purpose
 const cors = require("cors");
 app.use(cors({
-  origin: "http://localhost:3000",  // The frontend's URL
+  origin: "http://localhost:3000",  // Added URL to support cookies (replace with your frontend URL)
   credentials: true,  // Allow credentials (cookies)
 }));
 // CORS added for Deployement purpose

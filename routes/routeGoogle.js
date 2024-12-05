@@ -67,26 +67,55 @@ router.get("/google-auth-callback", async (req, res) => {
       code,
       redirect_uri: redirectUri,
     });
-    console.log(tokens);
+    // console.log(tokens);
     googleToken = tokens;
 
     // res.json({ code: code, tokens: tokens });
 
     // Setting the token in the cookie at the time of authentication
     res.cookie("token", googleToken.access_token, {
-      httpOnly: true, // Prevents JavaScript access
+      httpOnly: false, // Prevents JavaScript access for fetching cookie on client side
       secure: process.env.NODE_ENV === "production", // Only HTTPS in production
       sameSite: "strict", // Protects against CSRF
       maxAge: 60 * 60 * 1000, // 1 hour
     });
 
-    res
-      .status(200)
-      //   .json({ googleToken: googleToken })
-      .send("Authentication successful! You may close this window.");
+    // res
+    //   .status(200)
+    //   //   .json({ googleToken: googleToken })
+    //   .send("Authentication successful! You may close this window.");
+
+    // HTML to display a message and close after 5 seconds
+    res.send(`
+        <html>
+          <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
+            <h2>Authentication Successful!</h2>
+            <p>You can now close this window, or it will close automatically in 3 seconds.</p>
+            <script>
+              window.opener.postMessage({ success: true, token: "${googleToken.access_token}" }, "*");
+              setTimeout(() => {
+                window.close();
+              }, 3000);
+            </script>
+          </body>
+        </html>
+      `);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Authentication failed.");
+    // res.status(500).send("Authentication failed.");
+    res.status(500).send(`
+        <html>
+          <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
+            <h2>Authentication Failed</h2>
+            <p>There was an error during authentication. Please try again later.</p>
+            <script>
+              setTimeout(() => {
+                window.close();
+              }, 5000);
+            </script>
+          </body>
+        </html>
+      `);
   }
 });
 
@@ -131,7 +160,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
       fields: "files(id, name)",
     });
 
-    console.log("Upload Token", googleToken.access_token);
+    // console.log("Upload Token", googleToken.access_token);
 
     mongoClient = await connectToCluster(uri);
     const db = mongoClient.db("health-db");
@@ -162,7 +191,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
       //   console.log(
       //     `File "${req.file.originalname}" already exists with ID: ${fileId}`
       //   );
-      console.log(`File "${req.file.originalname}" updated with ID: ${fileId}`);
+      //   console.log(`File "${req.file.originalname}" updated with ID: ${fileId}`);
 
       // Update the document in the database
       const filter = { Document_Drive_Id: fileId }; // Condition to find the document
@@ -256,8 +285,9 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
   }
 });
 
+// Fetch Month data from Google Drive
 router.get("/fetch-data", async (req, res) => {
-  console.log("Fetch Token", req.cookies);
+  //   console.log("Fetch Token", req.cookies);
 
   if (req.cookies.token === undefined || req.cookies.token === null) {
     res.status(401).json({ message: "Please authenticate with Google first." });
@@ -311,7 +341,7 @@ router.get("/fetch-data", async (req, res) => {
       id: file.id,
     }));
 
-    console.log(result);
+    // console.log(result);
 
     // Use Promise.all to ensure all operations complete
     // This function will return the result array without empty entries in result
@@ -354,12 +384,13 @@ router.get("/fetch-data", async (req, res) => {
   }
 });
 
+// Fetch Dated files from Google Drive
 router.get("/fetch-detailed-data", async (req, res) => {
   try {
     const { token } = req.cookies;
     const { code } = req.query;
-    console.log("Code", code);
-    console.log("Fetch Token", req.cookies);
+    // console.log("Code", code);
+    // console.log("Fetch Token", req.cookies);
 
     const auth = new google.auth.OAuth2(
       process.env.client_id,
@@ -410,7 +441,7 @@ router.get("/fetch-detailed-data", async (req, res) => {
 
             dbResult = dbResult[0];
 
-            console.log("dbResult => ", dbResult);
+            // console.log("dbResult => ", dbResult);
 
             imgArray.push({
               fileName: file2.name,
@@ -448,7 +479,16 @@ router.get("/fetch-detailed-data", async (req, res) => {
       console.log("No files found in the folder.");
     }
 
-    console.log(result);
+    let isoTimestamp = new Date().toISOString();
+    console.log("Sort Start:", isoTimestamp);
+
+    // console.log(result);
+    result.sort((a, b) => {
+      return new Date(a.Date) - new Date(b.Date);
+    });
+
+    isoTimestamp = new Date().toISOString();
+    console.log("Sort End:", isoTimestamp);
 
     res.status(200).json({ result: result });
   } catch (error) {
