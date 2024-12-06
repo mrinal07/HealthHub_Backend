@@ -45,11 +45,17 @@ async function connectToCluster(uri) {
 
 // In-memory token store (use a database in production)
 let googleToken = null;
-const redirectUri = "http://localhost:5000/api/google/google-auth-callback";
+const BASE_URL =  "https://healthhub-backend-923347260291.us-central1.run.app/"
+
+// Localhost redirect URI for testing
+// const redirectUri = "http://localhost:5000/api/google/google-auth-callback"; 
+
+// PROD redirect URI
+const redirectUri = BASE_URL+"api/google/google-auth-callback"; 
 
 // Route to get Google OAuth URL STEP 1
 router.get("/google-auth-url", (req, res) => {
-  const authUrl = oAuth2Client.generateAuthUrl({
+  const authUrl = oAuth2Client.generateAuthUrl({ 
     access_type: "offline",
     scope: ["https://www.googleapis.com/auth/drive.file"],
     redirect_uri: redirectUri,
