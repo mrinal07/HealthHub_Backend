@@ -55,7 +55,7 @@ router.get("/google-auth-url", (req, res) => {
     redirect_uri: redirectUri,
   });
 
-  //   console.log(authUrl);
+    console.log(authUrl);
   res.json({ url: authUrl });
 });
 
@@ -67,7 +67,7 @@ router.get("/google-auth-callback", async (req, res) => {
       code,
       redirect_uri: redirectUri,
     });
-    // console.log(tokens);
+    console.log(tokens);
     googleToken = tokens;
 
     // res.json({ code: code, tokens: tokens });
@@ -123,6 +123,7 @@ const upload2 = multer({ dest: path.join(__dirname, "../resources/") });
 
 // Upload Documents to Google Drive STEP 3
 router.post("/upload-data", upload2.single("document"), async (req, res) => {
+    console.log("Upload Data Token", googleToken);
   if (!googleToken) {
     return res.status(401).send("Please authenticate with Google first.");
   }
@@ -160,7 +161,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
       fields: "files(id, name)",
     });
 
-    // console.log("Upload Token", googleToken.access_token);
+    console.log("Upload Token", googleToken.access_token);
 
     mongoClient = await connectToCluster(uri);
     const db = mongoClient.db("health-db");
@@ -287,7 +288,7 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
 
 // Fetch Month data from Google Drive
 router.get("/fetch-data", async (req, res) => {
-  //   console.log("Fetch Token", req.cookies);
+    console.log("Fetch Token", req.cookies);
 
   if (req.cookies.token === undefined || req.cookies.token === null) {
     res.status(401).json({ message: "Please authenticate with Google first." });
@@ -389,8 +390,8 @@ router.get("/fetch-detailed-data", async (req, res) => {
   try {
     const { token } = req.cookies;
     const { code } = req.query;
-    // console.log("Code", code);
-    // console.log("Fetch Token", req.cookies);
+    console.log("Code", code);
+    console.log("Fetch Token", req.cookies);
 
     const auth = new google.auth.OAuth2(
       process.env.client_id,
