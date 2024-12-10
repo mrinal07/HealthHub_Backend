@@ -145,42 +145,33 @@ router.post("/signup-user", async (req, res) => {
   }
 });
 
-// Delete User Data
-router.post("/delete-user", async (req, res) => {
-  debugger;
+// Login user for checking
+router.get("/auth-user", userVerification, async (req, res) => {
   try {
-    mongoClient = await connectToCluster(uri);
-    const db = mongoClient.db("health-db");
-    const collection = db.collection("login-user");
-
-    const filter = { _id: new ObjectId(req.body._id) };
-    // console.log(filter);
-
-    const result = await collection.deleteOne(filter);
-    // console.log(result);
-
-    result.deletedCount === 1
-      ? res.status(200).send({
-          data: result,
-          success: true,
-          message: "User Updated Successfully",
-        })
-      : res.status(200).send({
-          data: result,
-          success: false,
-          message: "User Not Deleted Server issue",
-        });
+    console.log(req.userData);
+    if (req.userData) {
+      return res.status(200).send({
+        data: req.userData,
+        success: true,
+        message: "User Authenticated",
+      });
+    }
   } catch (error) {
-    res.status(500).send(error);
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await mongoClient.close();
+    console.log(error);
   }
 });
 
 // Login User
 router.post("/login-user", async (req, res) => {
   try {
+    if (req.userData) {
+      return res.status(200).send({
+        data: req.userData,
+        success: true,
+        message: "User Authenticated",
+      });
+    }
+
     const password = req.body.Password;
     const username = req.body.Username;
     const email = req.body.Email;
@@ -249,6 +240,38 @@ router.post("/login-user", async (req, res) => {
     // await mongoClient.close();
   }
 });
+// Delete User Data
+router.post("/delete-user", async (req, res) => {
+  debugger;
+  try {
+    mongoClient = await connectToCluster(uri);
+    const db = mongoClient.db("health-db");
+    const collection = db.collection("login-user");
+
+    const filter = { _id: new ObjectId(req.body._id) };
+    // console.log(filter);
+
+    const result = await collection.deleteOne(filter);
+    // console.log(result);
+
+    result.deletedCount === 1
+      ? res.status(200).send({
+          data: result,
+          success: true,
+          message: "User Updated Successfully",
+        })
+      : res.status(200).send({
+          data: result,
+          success: false,
+          message: "User Not Deleted Server issue",
+        });
+  } catch (error) {
+    res.status(500).send(error);
+  } finally {
+    // Ensures that the client will close when you finish/error
+    await mongoClient.close();
+  }
+});
 
 //#endregion
 
@@ -299,7 +322,7 @@ const upload = multer({ storage });
 // });
 //#endregion
 
-//#region Documents CRUD 
+//#region Documents CRUD
 // Get All or By Id(Specific) Document Data
 router.get("/get-document", async (req, res) => {
   try {
@@ -584,22 +607,20 @@ router.get("/download/:filename", (req, res) => {
 //         fields: "id, webViewLink, webContentLink",
 //       });
 
-     
-  
 //       const filePath = req.file.path;
-  
+
 //       // console.log("File path:", filePath);
 //       // console.log(req.body);
 //       // console.log(path.basename(filePath));
-  
+
 //       mongoClient = await connectToCluster(uri);
 //       const db = mongoClient.db("health-db");
 //       const collection = db.collection("document-user");
-  
+
 //       // console.log(req.body._id);
-  
+
 //       const filter = { _id: new ObjectId(req.body._id) }; // Condition to find the document
-  
+
 //       const data = {
 //         $set: {
 //           User_Id: req.body.User_Id,
@@ -616,7 +637,6 @@ router.get("/download/:filename", (req, res) => {
 //         },
 //       };
 //       const result = await collection.updateOne(filter, data, { upsert: true });
-
 
 //       res.status(200).json({
 //         message: "File uploaded successfully!",
@@ -693,6 +713,37 @@ router.get("/download/:filename", (req, res) => {
 // }
 
 //#endregion
+
+// Logout User
+router.post("/logout-user", async (req, res) => {
+  try {
+    // console.log(req.body);
+    mongoClient = await connectToCluster(uri);
+    const db = mongoClient.db("health-db");
+    const collection = db.collection("login-user");
+
+    const filter = { _id: new ObjectId(req.body._id) }; // Condition to find the document
+
+    const data = {
+      $set: {
+        Login_Status: false,
+        Login_Token: "",
+        Last_Modify_Date: Date.now(),
+      },
+    };
+    const result = await collection.updateOne(filter, data, {
+      upsert: true,
+    });
+
+    res.status(200).send({ result: result });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send(error);
+  } finally {
+    // Ensures that the client will close when you finish/error
+    await mongoClient.close();
+  }
+});
 
 //#region Module Export
 // If dont write below line will get this error

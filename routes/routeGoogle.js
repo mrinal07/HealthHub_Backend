@@ -11,6 +11,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { google } = require("googleapis");
+
 const monthNames = [
   "January",
   "February",
@@ -45,23 +46,24 @@ async function connectToCluster(uri) {
 
 // In-memory token store (use a database in production)
 let googleToken = null;
-const BASE_URL =  "https://healthhub-backend-923347260291.us-central1.run.app/"
+
+// const BASE_URL =  "https://healthhub-backend-923347260291.us-central1.run.app/"
 
 // Localhost redirect URI for testing
-// const redirectUri = "http://localhost:5000/api/google/google-auth-callback"; 
+const BASE_URL = "http://localhost:5000/";
 
 // PROD redirect URI
-const redirectUri = BASE_URL+"api/google/google-auth-callback"; 
+const redirectUri = BASE_URL + "api/google/google-auth-callback";
 
 // Route to get Google OAuth URL STEP 1
 router.get("/google-auth-url", (req, res) => {
-  const authUrl = oAuth2Client.generateAuthUrl({ 
+  const authUrl = oAuth2Client.generateAuthUrl({
     access_type: "offline",
     scope: ["https://www.googleapis.com/auth/drive.file"],
     redirect_uri: redirectUri,
   });
 
-    console.log(authUrl);
+  console.log(authUrl);
   res.json({ url: authUrl });
 });
 
@@ -69,6 +71,10 @@ router.get("/google-auth-url", (req, res) => {
 router.get("/google-auth-callback", async (req, res) => {
   const { code } = req.query;
   try {
+    mongoClient = await connectToCluster(uri);
+    const db = mongoClient.db("health-db");
+    const collection = db.collection("login-user");
+
     const { tokens } = await oAuth2Client.getToken({
       code,
       redirect_uri: redirectUri,
@@ -76,60 +82,83 @@ router.get("/google-auth-callback", async (req, res) => {
     console.log(tokens);
     googleToken = tokens;
 
-    // res.json({ code: code, tokens: tokens });
+    console.log("Google Token", tokens.access_token);
+
+    // Creating unique secret token for the user and store it in the database as well as in the cookie
+    const token = createSecretToken(tokens.access_token);
+
+    const filter = { token: token }; // Condition to find the document
+    userData = {
+      $set: {
+        // Username: req.body.Username,
+        // Password: hashPassword,
+        // Email: req.body.Email,
+        Login_Token: token,
+        Google_Token: tokens,
+        Login_Status: 1,
+        Status_Enum: 1,
+        Lock_Id: 1,
+        Last_Modify_Date: new Date().toISOString(), // Last Modify Date,
+      },
+    };
+
+    const result = await collection.updateOne(filter, userData, {
+      upsert: true,
+    });
+
+    console.log("User data inserted: ", result);
 
     // Setting the token in the cookie at the time of authentication
-    res.cookie("token", googleToken.access_token, {
+    res.cookie("token", token, {
       httpOnly: false, // Prevents JavaScript access for fetching cookie on client side
       secure: process.env.NODE_ENV === "production", // Only HTTPS in production
       sameSite: "strict", // Protects against CSRF
       maxAge: 60 * 60 * 1000, // 1 hour
     });
 
-    // res
-    //   .status(200)
-    //   //   .json({ googleToken: googleToken })
-    //   .send("Authentication successful! You may close this window.");
-
+    res.redirect("http://localhost:3000/home");
     // HTML to display a message and close after 5 seconds
-    res.send(`
-        <html>
-          <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
-            <h2>Authentication Successful!</h2>
-            <p>You can now close this window, or it will close automatically in 3 seconds.</p>
-            <script>
-              window.opener.postMessage({ success: true, token: "${googleToken.access_token}" }, "*");
-              setTimeout(() => {
-                window.close();
-              }, 3000);
-            </script>
-          </body>
-        </html>
-      `);
+    // res.send(`
+    //     <html>
+    //       <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
+    //         <h2>Authentication Successful!</h2>
+    //         <p>You can now close this window, or it will close automatically in 3 seconds.</p>
+    //         <script>
+    //           window.opener.postMessage({ success: true, token: "${googleToken.access_token}" }, "*");
+    //           setTimeout(() => {
+    //             window.close();
+    //           }, 3000);
+    //         </script>
+    //       </body>
+    //     </html>
+    //   `);
   } catch (err) {
     console.error(err);
+    res.redirect("http://localhost:3000/login");
     // res.status(500).send("Authentication failed.");
-    res.status(500).send(`
-        <html>
-          <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
-            <h2>Authentication Failed</h2>
-            <p>There was an error during authentication. Please try again later.</p>
-            <script>
-              setTimeout(() => {
-                window.close();
-              }, 5000);
-            </script>
-          </body>
-        </html>
-      `);
+    // res.status(500).send(`
+    //     <html>
+    //       <body style="text-align:center; font-family: Arial, sans-serif; padding-top: 50px;">
+    //         <h2>Authentication Failed</h2>
+    //         <p>There was an error during authentication. Please try again later.</p>
+    //         <script>
+    //           setTimeout(() => {
+    //             window.close();
+    //           }, 5000);
+    //         </script>
+    //       </body>
+    //     </html>
+    //   `);
   }
 });
 
 const upload2 = multer({ dest: path.join(__dirname, "../resources/") });
 
 // Upload Documents to Google Drive STEP 3
-router.post("/upload-data", upload2.single("document"), async (req, res) => {
-    console.log("Upload Data Token", googleToken);
+router.post("/upload-data",userVerification, upload2.single("document"), async (req, res) => {
+  const token = req.userData;
+  googleToken = token;
+  console.log("Upload Data Token", googleToken);
   if (!googleToken) {
     return res.status(401).send("Please authenticate with Google first.");
   }
@@ -293,15 +322,21 @@ router.post("/upload-data", upload2.single("document"), async (req, res) => {
 });
 
 // Fetch Month data from Google Drive
-router.get("/fetch-data", async (req, res) => {
-    console.log("Fetch Token", req.cookies);
+router.get("/fetch-data", userVerification, async (req, res) => {
+  // const { token } = req.cookies;
 
-  if (req.cookies.token === undefined || req.cookies.token === null) {
+  // Here I am using the token from the cookie which is transferred from the middleware
+  const token = req.userData.access_token;
+
+  // console.log("Fetch Token const { token } ", token);
+
+  // console.log("Route req.userData ", req.userData );
+  // console.log("Fetch Token", req.cookies.token);
+
+  if (token === undefined || token === null) {
     res.status(401).json({ message: "Please authenticate with Google first." });
     return;
   }
-
-  const { token } = req.cookies;
 
   const auth = new google.auth.OAuth2(
     process.env.client_id,
@@ -390,14 +425,16 @@ router.get("/fetch-data", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
+ 
 // Fetch Dated files from Google Drive
-router.get("/fetch-detailed-data", async (req, res) => {
+router.get("/fetch-detailed-data",userVerification, async (req, res) => {
   try {
-    const { token } = req.cookies;
+
+    // const { token } = req.cookies;
+    const token = req.userData.access_token;
     const { code } = req.query;
-    console.log("Code", code);
-    console.log("Fetch Token", req.cookies);
+    // console.log("Code", code);
+    // console.log("Fetch Token", req.cookies);
 
     const auth = new google.auth.OAuth2(
       process.env.client_id,

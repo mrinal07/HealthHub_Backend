@@ -21,32 +21,47 @@ async function connectToCluster(uri) {
 }
 
 module.exports.userVerification = (req, res, next) => {
+
+  // Encrypted token is stored in the cookie
   const token = req.cookies.token;
-  //   console.log(token);
+
+  // console.log("userVerification ", token);
   if (!token) {
     return res.json({ status: false });
   }
 
   jwt.verify(token, process.env.TOKEN_KEY, async (err, data) => {
+    console.log("data ", data);
+
     if (err) {
-      return res.json({ status: false });
+      console.log("Middleware Error ", err);
+      return res.status(403).json({ status: false });
     } else {
+      // console.log("Middleware Success ", data);
+      console.log("Middleware Success ");
+
       mongoClient = await connectToCluster(uri);
       const db = mongoClient.db("health-db");
       const collection = db.collection("login-user");
 
-      //   console.log(data.id);
+      // Decrypting the token and finding the user in the database
+      // console.log("data.id=> ", data.id);
+
+      result = await collection.findOne({
+        "Google_Token.access_token": data.id,
+      });      
+      
+      // console.log("Middleware result ", result);
 
       // data.id is the email id of the user
-      result = await collection.findOne({ Email: data.id });
-
-      //   console.log(result);
 
       if (result) {
+        // adding the user data to the request object
+        req.userData = result.Google_Token;
         // next() is used to move to the next middleware or route
         next();
         // return res.json({ status: true, user: result.Username });
-      } else return res.json({ status: false });
+      } else return res.status(404).json({ status: false });
     }
   });
 };
