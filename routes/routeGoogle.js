@@ -47,10 +47,10 @@ async function connectToCluster(uri) {
 // In-memory token store (use a database in production)
 let googleToken = null;
 
-// const BASE_URL =  "https://healthhub-backend-923347260291.us-central1.run.app/"
+const BASE_URL = "https://healthhub-backend-923347260291.us-central1.run.app/";
 
 // Localhost redirect URI for testing
-const BASE_URL = "http://localhost:5000/";
+// const BASE_URL = "http://localhost:5000/";
 
 // PROD redirect URI
 const redirectUri = BASE_URL + "api/google/google-auth-callback";
@@ -116,7 +116,7 @@ router.get("/google-auth-callback", async (req, res) => {
       maxAge: 60 * 60 * 1000, // 1 hour
     });
 
-    res.redirect("http://localhost:3000/home");
+    res.redirect(BASE_URL + "home");
     // HTML to display a message and close after 5 seconds
     // res.send(`
     //     <html>
@@ -134,7 +134,7 @@ router.get("/google-auth-callback", async (req, res) => {
     //   `);
   } catch (err) {
     console.error(err);
-    res.redirect("http://localhost:3000/login");
+    res.redirect(BASE_URL + "login");
     // res.status(500).send("Authentication failed.");
     // res.status(500).send(`
     //     <html>
@@ -155,150 +155,94 @@ router.get("/google-auth-callback", async (req, res) => {
 const upload2 = multer({ dest: path.join(__dirname, "../resources/") });
 
 // Upload Documents to Google Drive STEP 3
-router.post("/upload-data",userVerification, upload2.single("document"), async (req, res) => {
-  const token = req.userData;
-  googleToken = token;
-  console.log("Upload Data Token", googleToken);
-  if (!googleToken) {
-    return res.status(401).send("Please authenticate with Google first.");
-  }
-
-  const drive = getDriveClient(googleToken);
-
-  try {
-    if (!req.file) {
-      return res.status(400).send("No file uploaded.");
+router.post(
+  "/upload-data",
+  userVerification,
+  upload2.single("document"),
+  async (req, res) => {
+    const token = req.userData;
+    googleToken = token;
+    console.log("Upload Data Token", googleToken);
+    if (!googleToken) {
+      return res.status(401).send("Please authenticate with Google first.");
     }
 
-    // Creating root folder in Google Drive
-    const rootFolderData = await createFolder("HealthHub");
+    const drive = getDriveClient(googleToken);
 
-    monthNumber = new Date().toISOString().split("T")[0].split("-")[1];
+    try {
+      if (!req.file) {
+        return res.status(400).send("No file uploaded.");
+      }
 
-    const createMonthFolder = await createFolder(
-      monthNames[monthNumber - 1] +
-        "-" +
-        new Date().toISOString().split("T")[0].split("-")[0],
-      rootFolderData.id
-    );
+      // Creating root folder in Google Drive
+      const rootFolderData = await createFolder("HealthHub");
 
-    // Creating subfolder inside root folder
-    const childFolderData = await createFolder(
-      moment().format("YYYY-MM-DD"),
-      createMonthFolder.id
-    );
-    // console.log(rootFolderData+" "+childFolderData);
+      monthNumber = new Date().toISOString().split("T")[0].split("-")[1];
 
-    // Check if the file already exists in the folder
-    const query = `name='${req.file.originalname}' and '${childFolderData.id}' in parents and trashed=false`;
-    const existingFiles = await drive.files.list({
-      q: query,
-      fields: "files(id, name)",
-    });
+      const createMonthFolder = await createFolder(
+        monthNames[monthNumber - 1] +
+          "-" +
+          new Date().toISOString().split("T")[0].split("-")[0],
+        rootFolderData.id
+      );
 
-    console.log("Upload Token", googleToken.access_token);
+      // Creating subfolder inside root folder
+      const childFolderData = await createFolder(
+        moment().format("YYYY-MM-DD"),
+        createMonthFolder.id
+      );
+      // console.log(rootFolderData+" "+childFolderData);
 
-    mongoClient = await connectToCluster(uri);
-    const db = mongoClient.db("health-db");
-    const collection = db.collection("document-user");
-
-    // /google-auth-callback route will set the token in the cookie
-    // res.cookie("token", googleToken.access_token, {
-    //   httpOnly: true, // Prevents JavaScript access
-    //   secure: process.env.NODE_ENV === "production", // Only HTTPS in production
-    //   sameSite: "strict", // Protects against CSRF
-    //   maxAge: 60 * 60 * 1000, // 1 hour
-    // });
-
-    // If the file already exists in the folder, return the file ID
-    if (existingFiles.data.files.length > 0) {
-      const fileId = existingFiles.data.files[0].id;
-      const filePath = req.file.path;
-
-      // Overwrite the file in google drive
-      const updateExistingDoc = await drive.files.update({
-        fileId,
-        media: {
-          mimeType: "application/octet-stream",
-          body: fs.createReadStream(filePath),
-        },
+      // Check if the file already exists in the folder
+      const query = `name='${req.file.originalname}' and '${childFolderData.id}' in parents and trashed=false`;
+      const existingFiles = await drive.files.list({
+        q: query,
+        fields: "files(id, name)",
       });
 
-      //   console.log(
-      //     `File "${req.file.originalname}" already exists with ID: ${fileId}`
-      //   );
-      //   console.log(`File "${req.file.originalname}" updated with ID: ${fileId}`);
+      console.log("Upload Token", googleToken.access_token);
 
-      // Update the document in the database
-      const filter = { Document_Drive_Id: fileId }; // Condition to find the document
-      const data = {
-        $set: {
-          Document_Name: req.body.Document_Name, // Document Name
-          Document_Type: req.body.Document_Type, // Document Type
-          Document_Description: req.body.Additional_Notes, // Additional Notes
-          Last_Modify_Date: new Date().toISOString(), // Last Modify Date
-          Status_Enum: Number(req.body.Status_Enum) ?? 0, // Status Enum
-          Lock_Id: req.body._id === undefined ? 1 : req.body.Lock_Id + 1, // Lock ID
-        },
-      };
-      const result = await collection.updateOne(filter, data, {
-        upsert: true,
-      });
+      mongoClient = await connectToCluster(uri);
+      const db = mongoClient.db("health-db");
+      const collection = db.collection("document-user");
 
-      res.status(200).json({
-        message: `File "${req.file.originalname}" updated`,
-        result: result,
-        fileId: existingFiles.data.files[0].id,
-        webViewLink: "NA",
-        webContentLink: "NA",
-        duplicate: true,
-      });
-    }
-    // If the file doesn't exist, upload the file
-    else {
-      const fileMetadata = {
-        name: req.file.originalname,
-        parents: [childFolderData.id], // Optional: Replace with a specific folder ID.
-      };
+      // /google-auth-callback route will set the token in the cookie
+      // res.cookie("token", googleToken.access_token, {
+      //   httpOnly: true, // Prevents JavaScript access
+      //   secure: process.env.NODE_ENV === "production", // Only HTTPS in production
+      //   sameSite: "strict", // Protects against CSRF
+      //   maxAge: 60 * 60 * 1000, // 1 hour
+      // });
 
-      const media = {
-        mimeType: req.file.mimetype,
-        body: fs.createReadStream(req.file.path),
-      };
-
-      const response = await drive.files.create({
-        resource: fileMetadata,
-        media,
-        fields: "id, webViewLink, webContentLink",
-      });
-
-      if (response.data.id) {
+      // If the file already exists in the folder, return the file ID
+      if (existingFiles.data.files.length > 0) {
+        const fileId = existingFiles.data.files[0].id;
         const filePath = req.file.path;
 
-        // console.log("File uploaded successfully!");
-        // console.log(req.body);
-        // console.log(path.basename(filePath));
+        // Overwrite the file in google drive
+        const updateExistingDoc = await drive.files.update({
+          fileId,
+          media: {
+            mimeType: "application/octet-stream",
+            body: fs.createReadStream(filePath),
+          },
+        });
 
-        // console.log(req.body._id);
+        //   console.log(
+        //     `File "${req.file.originalname}" already exists with ID: ${fileId}`
+        //   );
+        //   console.log(`File "${req.file.originalname}" updated with ID: ${fileId}`);
 
-        const filter = { _id: new ObjectId(req.body._id) }; // Condition to find the document
-
+        // Update the document in the database
+        const filter = { Document_Drive_Id: fileId }; // Condition to find the document
         const data = {
           $set: {
-            User_Id: req.body.User_Id, // User ID
             Document_Name: req.body.Document_Name, // Document Name
             Document_Type: req.body.Document_Type, // Document Type
-            Document_File_Path: filePath, // File Path in the server
-            Document_Upload_Date: new Date().toISOString().split("T")[0], // Upload Date
-            Document_Expire_Date: new Date(req.body.Document_Expire_Date) // Expiry Date
-              .toISOString()
-              .split("T")[0],
             Document_Description: req.body.Additional_Notes, // Additional Notes
-            Document_Drive_Id: response.data.id, // Drive ID
-            Document_Parent_Folder_Id: childFolderData.id, // Parent Folder ID
+            Last_Modify_Date: new Date().toISOString(), // Last Modify Date
             Status_Enum: Number(req.body.Status_Enum) ?? 0, // Status Enum
             Lock_Id: req.body._id === undefined ? 1 : req.body.Lock_Id + 1, // Lock ID
-            Last_Modify_Date: new Date().toISOString(), // Last Modify Date
           },
         };
         const result = await collection.updateOne(filter, data, {
@@ -306,20 +250,81 @@ router.post("/upload-data",userVerification, upload2.single("document"), async (
         });
 
         res.status(200).json({
-          message: "File uploaded successfully!",
-          fileId: response.data.id,
-          webViewLink: response.data.webViewLink,
-          webContentLink: response.data.webContentLink,
+          message: `File "${req.file.originalname}" updated`,
           result: result,
-          duplicate: false,
+          fileId: existingFiles.data.files[0].id,
+          webViewLink: "NA",
+          webContentLink: "NA",
+          duplicate: true,
         });
       }
+      // If the file doesn't exist, upload the file
+      else {
+        const fileMetadata = {
+          name: req.file.originalname,
+          parents: [childFolderData.id], // Optional: Replace with a specific folder ID.
+        };
+
+        const media = {
+          mimeType: req.file.mimetype,
+          body: fs.createReadStream(req.file.path),
+        };
+
+        const response = await drive.files.create({
+          resource: fileMetadata,
+          media,
+          fields: "id, webViewLink, webContentLink",
+        });
+
+        if (response.data.id) {
+          const filePath = req.file.path;
+
+          // console.log("File uploaded successfully!");
+          // console.log(req.body);
+          // console.log(path.basename(filePath));
+
+          // console.log(req.body._id);
+
+          const filter = { _id: new ObjectId(req.body._id) }; // Condition to find the document
+
+          const data = {
+            $set: {
+              User_Id: req.body.User_Id, // User ID
+              Document_Name: req.body.Document_Name, // Document Name
+              Document_Type: req.body.Document_Type, // Document Type
+              Document_File_Path: filePath, // File Path in the server
+              Document_Upload_Date: new Date().toISOString().split("T")[0], // Upload Date
+              Document_Expire_Date: new Date(req.body.Document_Expire_Date) // Expiry Date
+                .toISOString()
+                .split("T")[0],
+              Document_Description: req.body.Additional_Notes, // Additional Notes
+              Document_Drive_Id: response.data.id, // Drive ID
+              Document_Parent_Folder_Id: childFolderData.id, // Parent Folder ID
+              Status_Enum: Number(req.body.Status_Enum) ?? 0, // Status Enum
+              Lock_Id: req.body._id === undefined ? 1 : req.body.Lock_Id + 1, // Lock ID
+              Last_Modify_Date: new Date().toISOString(), // Last Modify Date
+            },
+          };
+          const result = await collection.updateOne(filter, data, {
+            upsert: true,
+          });
+
+          res.status(200).json({
+            message: "File uploaded successfully!",
+            fileId: response.data.id,
+            webViewLink: response.data.webViewLink,
+            webContentLink: response.data.webContentLink,
+            result: result,
+            duplicate: false,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      res.status(500).send("Failed to upload file.");
     }
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Failed to upload file.");
   }
-});
+);
 
 // Fetch Month data from Google Drive
 router.get("/fetch-data", userVerification, async (req, res) => {
@@ -425,11 +430,10 @@ router.get("/fetch-data", userVerification, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
- 
-// Fetch Dated files from Google Drive
-router.get("/fetch-detailed-data",userVerification, async (req, res) => {
-  try {
 
+// Fetch Dated files from Google Drive
+router.get("/fetch-detailed-data", userVerification, async (req, res) => {
+  try {
     // const { token } = req.cookies;
     const token = req.userData.access_token;
     const { code } = req.query;
